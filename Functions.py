@@ -105,7 +105,26 @@ def selMax_vol(BW):
 
     return BW
 
+def flip_image(img, flip):
+    if flip == 'UD':
+        img = np.flip(img, axis = 0)
+    elif flip == 'LR':
+        img = np.flip(img, axis = 1)
+    elif flip == 'BF':
+        img = np.flip(img, axis = 2)
+    return img
 
+def reorient_nifti(img, flip):
+    img = flip_image(img, flip)
+    return np.transpose(img,(2,1,0))
+
+def fill_spur_voxels(img):
+    strel = ndi.generate_binary_structure(3, 1)
+    img_dil = ndi.binary_dilation(img, strel,
+                                       border_value=0, iterations=2)
+    img_ero = ndi.binary_erosion(img_dil, strel,
+                                      border_value=0, iterations=1)
+    return (img_ero*1).astype(np.uint8)
 
 def load_scan(path):
     slices = [pydicom.dcmread(f'{path}/{s}',force=True) for s in os.listdir(path)]
@@ -200,7 +219,7 @@ def min_label_volume(im, bg=-1):
 def segment_lung_mask(image, fill_lung_structures=True):
     # not actually binary, but 1 and 2.
     # 0 is treated as background, which we do not want
-    binary_image = np.array(image >= -200, dtype=np.int8) + 1
+    binary_image = np.array(image >= -300, dtype=np.int8) + 1
     labels = measure.label(binary_image)
 
     # Pick the pixel in the very corner to determine which label is air.
@@ -228,10 +247,10 @@ def segment_lung_mask(image, fill_lung_structures=True):
     binary_image = 1 - binary_image  # Invert it, lungs are now 1
 
     # Remove other air pockets inside body
-    # labels = measure.label(binary_image, background=0)
-    # l_max = largest_label_volume(labels, bg=0)
-    # if l_max is not None:  # There are air pockets
-    #     binary_image[labels != l_max] = 0
+    labels = measure.label(binary_image, background=0)
+    l_max = largest_label_volume(labels, bg=0)
+    if l_max is not None:  # There are air pockets
+        binary_image[labels != l_max] = 0
 
     return binary_image
 

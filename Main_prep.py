@@ -1,38 +1,59 @@
+import numpy as np
+
 from Functions import *
 
 # set path and load files
 main_path = f'/media/david/61DA856534A7B963/David Ortiz DB/DATA/BDe'#f'/home/david/Desktop/BD'
-path_read = f'{main_path}/DICOMS'
-paths_read = get_paths(path_read, [], '')
+path_dicoms = f'{main_path}/DICOMS'
+path_airway = f'../IGA_code/raw-data/INRS2'
 
-for i, patient in enumerate(paths_read):
+def segmentation():
 
-    pos = get_patient_number(patient) + 1
-    patient_number = int(patient[pos:])
-    paths_states = get_paths(patient, [], '')
-    print(f'Patient to process: {patient_number}')
+    paths_read_dcm = get_paths(path_dicoms, [], '')
 
-    for state in paths_states:
-        pos = get_patient_number(state) + 1
-        state_name = state[pos:]
+    for i, patient in enumerate(paths_read_dcm):
 
-        print(f'Patient state {state_name}')
-        patient_dicom, affine = load_scan(state)
-        patient_pixels = get_pixels_hu(patient_dicom)
+        pos = get_patient_number(patient) + 1
+        patient_number = patient[pos:]
+        paths_states = get_paths(patient, [], '')
 
-        #%% Lung segmentation
-        lungs_mask = segment_lung_mask(patient_pixels,fill_lung_structures=True)
-        lungs_mask_clean = selMax_vol(lungs_mask)
+        path_patient_airs = f'{path_airway}/{patient_number}'
+        path_patient_airs = get_paths(path_patient_airs, [], '.gz')
 
-        nii_lung_path = f'{main_path}/NIFTI/{patient_number}'
-        create_dir(nii_lung_path)
-        nii_lung_path_state = f'{nii_lung_path}/{state_name}_LUNGS'
+        print(f'Patient to process: {patient_number}')
 
-        save_nifty_image(nii_lung_path_state,
-                         np.transpose(np.flipud(lungs_mask),(2,1,0)),
-                         affine)
+        for state in paths_states:
+            pos = get_patient_number(state) + 1
+            state_name = state[pos:]
+            print(f'Patient state {state_name}')
 
-        print(f'Saved: {state_name}_LUNGS')
+            # Lungs -------------
+            patient_dicom, affine = load_scan(state)
+            patient_pixels = get_pixels_hu(patient_dicom)
+            lungs_mask = segment_lung_mask(patient_pixels,fill_lung_structures = True)
+            lungs_mask_clean = np.asarray(selMax_vol(lungs_mask), dtype = bool)
 
-print('Finished.')
+            # Airways  ----------
+            strel = ndi.generate_binary_structure(3, 1)
+            airway_nifti_path = [path for path in path_patient_airs if state_name in path
+                                            and '_cut' not in path]
+            airway_binary = load_nifty_image(airway_nifti_path[0])[1]
+            airway_binary = reorient_nifti(airway_binary, 'BF')
+            airway_binary = ~ndi.binary_dilation(airway_binary, strel,
+                                                 border_value = 0, iterations = 2)
 
+            # process images --------
+            lungs_noairw = (airway_binary*1)*(lungs_mask_clean*1) == 1
+            lungs_noairw = fill_spur_voxels(lungs_noairw)
+
+            nii_lung_path = f'{main_path}/NIFTI/{patient_number}'
+            create_dir(nii_lung_path)
+            nii_lung_path_state = f'{nii_lung_path}/{state_name}_LUNGS.nii.gz'
+            save_nifty_image(nii_lung_path_state, reorient_nifti(lungs_noairw, 'UD'), affine)
+
+            print(f'Saved: {state_name}_LUNGS')
+
+    print('Finished.')
+
+if __name__ == '__main__':
+    segmentation()
