@@ -1,5 +1,3 @@
-import numpy as np
-
 from Functions import *
 
 # set path and load files
@@ -30,7 +28,7 @@ def segmentation():
             # Lungs -------------
             patient_dicom, affine = load_scan(state)
             patient_pixels = get_pixels_hu(patient_dicom)
-            lungs_mask = segment_lung_mask(patient_pixels,fill_lung_structures = True)
+            lungs_mask = segment_lung_mask(patient_pixels,fill_lung_structures = False)
             lungs_mask_clean = np.asarray(selMax_vol(lungs_mask), dtype = bool)
 
             # Airways  ----------
@@ -48,12 +46,29 @@ def segmentation():
 
             nii_lung_path = f'{main_path}/NIFTI/{patient_number}'
             create_dir(nii_lung_path)
-            nii_lung_path_state = f'{nii_lung_path}/{state_name}_LUNGS.nii.gz'
+            nii_lung_path_state = f'{nii_lung_path}/{patient_number}{state_name}_LUNGS.nii.gz'
             save_nifty_image(nii_lung_path_state, reorient_nifti(lungs_noairw, 'UD'), affine)
 
             print(f'Saved: {state_name}_LUNGS')
-
+        print(f'Finished patient {patient_number}\n')
     print('Finished.')
 
+def preprocess():
+
+    paths_read_dcm = get_paths(path_airway, [], '')
+    for i, patient in enumerate(paths_read_dcm):
+        pos = get_patient_number(patient) + 1
+        patient_number = patient[pos:]
+        print(f'Patient to process: {patient_number}')
+
+        path_patient_nifti = get_paths(patient, [], '.gz')
+        lungs_nifti_path = [path for path in path_patient_nifti if 'LUNGS' in path]
+
+        for lungs in lungs_nifti_path:
+            lungs_binary = load_nifty_image(lungs)[1]
+            lungs_binary = selMax_vol(lungs_binary,0.6)
+
+
 if __name__ == '__main__':
-    segmentation()
+    # segmentation()
+    preprocess()

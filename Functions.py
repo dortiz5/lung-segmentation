@@ -86,7 +86,7 @@ def BWperim(image,neighbourhood=1):
 
     return border_image
 
-def selMax_vol(BW):
+def selMax_vol(BW, th=0):
     m, n, d = BW.shape
 
     BW = ndi.binary_fill_holes(BW)
@@ -98,10 +98,15 @@ def selMax_vol(BW):
 
     ar = np.arange(0, len(volumen), 1.)
 
-    volumen = ar[volumen == np.max(volumen)]
+    if th == 0:
+        volumen = ar[volumen == np.max(volumen)]
+    else:
+        max_vol_th = np.max(volumen)*th
+        volumen = ar[volumen >= max_vol_th]
 
     BW = np.zeros((m, n, d))
-    BW[L == volumen + 1] = 1
+    for vol in volumen:
+        BW[L == vol + 1] = 1
 
     return BW
 
@@ -120,11 +125,13 @@ def reorient_nifti(img, flip):
 
 def fill_spur_voxels(img):
     strel = ndi.generate_binary_structure(3, 1)
-    img_dil = ndi.binary_dilation(img, strel,
+    img_ero = ndi.binary_erosion(img, strel,
+                                 border_value=0, iterations=2)
+    img_dil = ndi.binary_dilation(img_ero, strel,
                                        border_value=0, iterations=2)
-    img_ero = ndi.binary_erosion(img_dil, strel,
-                                      border_value=0, iterations=1)
-    return (img_ero*1).astype(np.uint8)
+
+
+    return (img_dil*1).astype(np.uint8)
 
 def load_scan(path):
     slices = [pydicom.dcmread(f'{path}/{s}',force=True) for s in os.listdir(path)]
@@ -184,7 +191,7 @@ def get_pixels_hu(scans):
     image = image.astype(np.int16)
     # Set outside-of-scan pixels to 0
     # The intercept is usually -1024, so air is approximately 0
-    image[image == -2000] = 100
+    image[image == -2000] = 1000
 
     # Convert to Hounsfield units (HU)
     intercept = scans[0].RescaleIntercept
