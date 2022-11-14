@@ -18,13 +18,14 @@ def voxvol_from_affine(affine):
     diag = affine.diagonal()
     return np.prod(diag)
 
-def get_nifti_volume(path, write = True):
+def get_nifti_volume(path, **kwargs):
     _, lungs_binary, _, affine = load_nifty_image(path)
     lungs_binary, unit_vol= selMax_vol(lungs_binary, 0.6)
     volume = np.sum(unit_vol) * voxvol_from_affine(affine)
 
-    if write:
-        save_nifty_image(f'/home/david/Desktop/test_nii', lungs_binary, affine)
+    if 'write' in kwargs:
+        pathout = kwargs.get('write')
+        save_nifty_image(pathout, lungs_binary.astype(np.uint8), affine)
 
     return volume
 
