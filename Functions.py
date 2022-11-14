@@ -2,8 +2,10 @@ import numpy as np
 import os, copy, pydicom
 import nibabel as nib
 from skimage.measure import label, regionprops
+from skimage.segmentation import clear_border
 from skimage import measure
 from scipy import ndimage as ndi
+import pandas as pd
 
 def load_nifty_image(img_dir):
     img = nib.load(img_dir)
@@ -12,6 +14,47 @@ def load_nifty_image(img_dir):
     affine = img.affine
     return img, data, hdr, affine
 
+def voxvol_from_affine(affine):
+    diag = affine.diagonal()
+    return np.prod(diag)
+
+def get_nifti_volume(path, write = True):
+    _, lungs_binary, _, affine = load_nifty_image(path)
+    lungs_binary, unit_vol= selMax_vol(lungs_binary, 0.6)
+    volume = np.sum(unit_vol) * voxvol_from_affine(affine)
+
+    if write:
+        save_nifty_image(f'/home/david/Desktop/test_nii', lungs_binary, affine)
+
+    return volume
+
+def calc_strain(vols):
+    return ((vols[1]-vols[0])/vols[0])*100
+
+def update_volume_dict(lungs_path, patient_number,
+                       volumes, dict = None):
+
+    if dict is None:
+        dict = {'patient': [], 'state': [],
+                'parenchyma': [], 'airways': []}
+
+    if 'ESP' in lungs_path:
+        state = 'expiration'
+    elif 'INSP' in lungs_path:
+        state = 'inspiration'
+    else:
+        state = 'relative'
+
+    dict['patient'].append(patient_number)
+    dict['state'].append(state)
+    dict['parenchyma'].append(volumes[0])
+    dict['airways'].append(volumes[1])
+
+    return dict
+
+def write_dataframe(dict, path):
+    data_df = pd.DataFrame(dict)
+    data_df.to_csv(f'{path}/DB_lung_airway_vols.csv')
 
 def save_nifty_image(img_dir, data, affine):
     # img = nib.spatialimages.SpatialImage(data, affine)
@@ -46,6 +89,7 @@ def get_paths(path,list_dir,ext=".gz"):
         elif os.path.isdir(path1):
             list_dir = get_paths(path1, list_dir, ext)
 
+    list_dir.sort()
     return list_dir
 
 def geometry(path_nifti):
@@ -62,7 +106,7 @@ def geometry(path_nifti):
     img,airway, hdr, affine = load_nifty_image(path_nifti)
 
     airway = np.round(airway)
-    airway = selMax_vol(airway)
+    airway = selMax_vol(airway)[0]
     perim = np.nonzero(BWperim(airway).ravel()==1)[0]
     perim = np.column_stack(np.unravel_index(perim,airway.shape))
 
@@ -86,7 +130,7 @@ def BWperim(image,neighbourhood=1):
 
     return border_image
 
-def selMax_vol(BW, th=0):
+def selMax_vol(BW, th=0.):
     m, n, d = BW.shape
 
     BW = ndi.binary_fill_holes(BW)
@@ -99,16 +143,19 @@ def selMax_vol(BW, th=0):
     ar = np.arange(0, len(volumen), 1.)
 
     if th == 0:
-        volumen = ar[volumen == np.max(volumen)]
+        vol_indx = ar[volumen == np.max(volumen)]
+        volumen_data = volumen[volumen == np.max(volumen)]
+
     else:
         max_vol_th = np.max(volumen)*th
-        volumen = ar[volumen >= max_vol_th]
+        vol_indx = ar[volumen >= max_vol_th]
+        volumen_data = volumen[volumen >= max_vol_th]
 
     BW = np.zeros((m, n, d))
-    for vol in volumen:
+    for vol in vol_indx:
         BW[L == vol + 1] = 1
 
-    return BW
+    return BW, volumen_data
 
 def flip_image(img, flip):
     if flip == 'UD':
@@ -123,15 +170,16 @@ def reorient_nifti(img, flip):
     img = flip_image(img, flip)
     return np.transpose(img,(2,1,0))
 
-def fill_spur_voxels(img):
+def clean_spur_voxels(img):
     strel = ndi.generate_binary_structure(3, 1)
-    img_ero = ndi.binary_erosion(img, strel,
-                                 border_value=0, iterations=2)
-    img_dil = ndi.binary_dilation(img_ero, strel,
+
+    img_dil = ndi.binary_dilation(img, strel,
                                        border_value=0, iterations=2)
 
+    img_ero = ndi.binary_erosion(img_dil, strel,
+                                 border_value=0, iterations=2)
 
-    return (img_dil*1).astype(np.uint8)
+    return (img_ero*1).astype(np.uint8)
 
 def load_scan(path):
     slices = [pydicom.dcmread(f'{path}/{s}',force=True) for s in os.listdir(path)]
@@ -191,7 +239,7 @@ def get_pixels_hu(scans):
     image = image.astype(np.int16)
     # Set outside-of-scan pixels to 0
     # The intercept is usually -1024, so air is approximately 0
-    image[image == -2000] = 1000
+    # image[image == -2000] = 100
 
     # Convert to Hounsfield units (HU)
     intercept = scans[0].RescaleIntercept
